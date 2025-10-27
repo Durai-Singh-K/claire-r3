@@ -1,13 +1,18 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Helmet } from 'react-helmet-async';
-import { Search, Filter, Grid, List, MapPin, Star, TrendingUp, Users, ShoppingBag, BarChart3 } from 'lucide-react';
+import { Search, Filter, Grid, List, MapPin, Star, TrendingUp, Users, ShoppingBag, BarChart3, Send } from 'lucide-react';
 import { Input, Button, Avatar, Badge, Loading } from '../components/ui';
 import { formatCompactNumber, capitalizeFirst } from '../utils/formatters';
 import { useDebounce } from '../hooks/useDebounce';
-import { searchAPI } from '../services/api';
+import { searchAPI, chatAPI } from '../services/api';
 import { CATEGORIES } from '../config/constants';
+import { useNavigate } from 'react-router-dom';
+import useAuthStore from '../store/authStore';
+import toast from 'react-hot-toast';
 
 const DiscoverPage = () => {
+  const navigate = useNavigate();
+  const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState('search'); // 'search' or 'trends'
   const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
   const [searchType, setSearchType] = useState('all'); // 'all', 'users', 'products', 'communities'
@@ -89,6 +94,55 @@ const DiscoverPage = () => {
 
   const handleQuickSearch = (searchTerm) => {
     setQuery(searchTerm);
+  };
+
+  const isMyPost = (item) => {
+    // Check if the post belongs to the current user
+    const authorId = item.author?._id || item.author;
+    return authorId === user?._id || authorId?.toString() === user?._id?.toString();
+  };
+
+  const handleInquireAboutProduct = async (item) => {
+    try {
+      // Check if user is trying to contact themselves
+      if (isMyPost(item)) {
+        toast.error('You cannot message yourself');
+        return;
+      }
+
+      // Get the author ID - handle both populated and non-populated author
+      const authorId = item.author?._id || item.author;
+
+      if (!authorId) {
+        toast.error('Author information not available');
+        return;
+      }
+
+      // Create or get existing conversation
+      toast.loading('Opening chat...', { id: 'inquire-product' });
+      const response = await chatAPI.createConversation({ userId: authorId });
+      const conversation = response.data.conversation;
+
+      toast.success('Redirecting to chat...', { id: 'inquire-product' });
+
+      // Navigate to messages page with the conversation ID and product info
+      navigate('/messages', {
+        state: {
+          conversationId: conversation._id,
+          productContext: item.product ? {
+            _id: item._id,
+            name: item.product.name,
+            price: item.product.price,
+            images: item.images,
+            description: item.product.description,
+            category: item.product.category
+          } : null
+        }
+      });
+    } catch (error) {
+      console.error('Failed to inquire about product:', error);
+      toast.error('Failed to open chat. Please try again.', { id: 'inquire-product' });
+    }
   };
 
   const ResultCard = ({ item, type }) => {
@@ -182,9 +236,6 @@ const DiscoverPage = () => {
                 </p>
                 <div className="flex items-center space-x-2 mt-2">
                   <Badge.Category category={item.product?.category} size="xs" />
-                  {item.product?.price && (
-                    <Badge.Price price={item.product.price} size="xs" />
-                  )}
                 </div>
               </div>
             </div>
@@ -199,9 +250,18 @@ const DiscoverPage = () => {
                   {item.author?.businessName}
                 </span>
               </div>
-              <Button size="sm" variant="outline">
-                Inquire
-              </Button>
+              {/* Show Inquire button only for products not owned by user */}
+              {!isMyPost(item) && (
+                <Button
+                  size="sm"
+                  variant="primary"
+                  icon={Send}
+                  onClick={() => handleInquireAboutProduct(item)}
+                  title="Inquire about this product"
+                >
+                  Inquire
+                </Button>
+              )}
             </div>
           </div>
         </div>

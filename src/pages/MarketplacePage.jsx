@@ -1,16 +1,71 @@
 import React, { useState } from 'react';
 import { Helmet } from 'react-helmet-async';
-import { Globe, Search, Filter, MapPin, Star, ShoppingBag, Heart, MessageSquare } from 'lucide-react';
+import { Globe, Search, Filter, MapPin, Star, ShoppingBag, Heart, MessageSquare, Send } from 'lucide-react';
 import { Button, Avatar, Badge, Input, Loading } from '../components/ui';
 import { formatCompactNumber, formatCurrency } from '../utils/formatters';
 import { CATEGORIES } from '../config/constants';
+import { useNavigate } from 'react-router-dom';
+import { chatAPI } from '../services/api';
+import useAuthStore from '../store/authStore';
+import toast from 'react-hot-toast';
 
 const MarketplacePage = () => {
+  const navigate = useNavigate();
+  const { user } = useAuthStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedLocation, setSelectedLocation] = useState('');
   const [sortBy, setSortBy] = useState('relevance');
   const [viewMode, setViewMode] = useState('grid');
+
+  const isMyProduct = (product) => {
+    // Check if the product belongs to the current user
+    const sellerId = product.seller?._id || product.seller?.id;
+    return sellerId === user?._id || sellerId?.toString() === user?._id?.toString();
+  };
+
+  const handleInquireAboutProduct = async (product) => {
+    try {
+      // Check if user is trying to contact themselves
+      if (isMyProduct(product)) {
+        toast.error('You cannot message yourself');
+        return;
+      }
+
+      // Get the seller ID
+      const sellerId = product.seller?._id || product.seller?.id;
+
+      if (!sellerId) {
+        toast.error('Seller information not available');
+        return;
+      }
+
+      // Create or get existing conversation
+      toast.loading('Opening chat...', { id: 'inquire-product' });
+      const response = await chatAPI.createConversation({ userId: sellerId });
+      const conversation = response.data.conversation;
+
+      toast.success('Redirecting to chat...', { id: 'inquire-product' });
+
+      // Navigate to messages page with the conversation ID and product info
+      navigate('/messages', {
+        state: {
+          conversationId: conversation._id,
+          productContext: {
+            _id: product.id,
+            name: product.name,
+            price: { amount: product.price, currency: product.currency, unit: product.unit },
+            images: product.images,
+            description: product.description,
+            category: product.category
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Failed to inquire about product:', error);
+      toast.error('Failed to open chat. Please try again.', { id: 'inquire-product' });
+    }
+  };
 
   // Mock marketplace data
   const products = [
@@ -144,9 +199,18 @@ const MarketplacePage = () => {
             <span>{formatCompactNumber(product.stats.likes)} likes</span>
           </div>
           <div className="flex items-center space-x-2">
-            <Button size="sm" variant="outline" icon={MessageSquare}>
-              Inquire
-            </Button>
+            {/* Show Inquire button only for products not owned by user */}
+            {!isMyProduct(product) && (
+              <Button
+                size="sm"
+                variant="primary"
+                icon={Send}
+                onClick={() => handleInquireAboutProduct(product)}
+                title="Inquire about this product"
+              >
+                Inquire
+              </Button>
+            )}
           </div>
         </div>
       </div>

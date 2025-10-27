@@ -125,7 +125,9 @@ export const usersAPI = {
   cancelFriendRequest: (requestId) => apiService.delete(`/users/friend-requests/${requestId}`),
   removeFriend: (userId) => apiService.delete(`/users/${userId}/friend`),
   getFriends: (userId, params = {}) => apiService.get(`/users/${userId}/friends`, { params }),
-  getSuggestions: () => apiService.get('/users/suggestions')
+  getSuggestions: () => apiService.get('/users/suggestions'),
+  follow: (userId) => apiService.post(`/users/${userId}/follow`),
+  unfollow: (userId) => apiService.delete(`/users/${userId}/follow`)
 };
 
 // Communities API

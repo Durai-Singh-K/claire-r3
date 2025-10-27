@@ -72,20 +72,27 @@ router.get('/', [
     posts = await Post.findProducts({ location, category: categoryArray[0] }, page, limit);
 
   } else {
-    // Get all public posts
+    // Get all posts (using fixed method)
     const categoryArray = categories ? categories.split(',') : [];
-    posts = await Post.findPublicFeed(page, limit, location, categoryArray);
+    posts = await Post.findForFeed(req.userId, {
+      page,
+      limit,
+      location,
+      categories: categoryArray,
+      sortBy: req.query.sortBy || 'newest'
+    });
   }
 
   // Add user interaction info
   const postsWithInteractions = posts.map(post => {
-    const liked = post.isLikedBy(req.userId);
+    const postDoc = new Post(post); // Create instance for methods
+    const liked = postDoc.isLikedBy(req.userId);
     return {
-      ...post.toObject(),
+      ...post,
       liked,
-      likeCount: post.likeCount,
-      commentCount: post.commentCount,
-      shareCount: post.shareCount
+      likeCount: post.likes?.length || 0,
+      commentCount: post.comments?.length || 0,
+      shareCount: post.shares?.length || 0
     };
   });
 
@@ -159,20 +166,27 @@ router.get('/feed', [
     posts = await Post.findProducts({ location, category: categoryArray[0] }, page, limit);
     
   } else {
-    // Get all public posts
+    // Get all posts (using new fixed method)
     const categoryArray = categories ? categories.split(',') : [];
-    posts = await Post.findPublicFeed(page, limit, location, categoryArray);
+    posts = await Post.findForFeed(req.userId, {
+      page,
+      limit,
+      location,
+      categories: categoryArray,
+      sortBy: req.query.sortBy || 'newest'
+    });
   }
-  
+
   // Add user interaction info
   const postsWithInteractions = posts.map(post => {
-    const liked = post.isLikedBy(req.userId);
+    const postDoc = new Post(post); // Create instance for methods
+    const liked = postDoc.isLikedBy(req.userId);
     return {
-      ...post.toObject(),
+      ...post,
       liked,
-      likeCount: post.likeCount,
-      commentCount: post.commentCount,
-      shareCount: post.shareCount
+      likeCount: post.likes?.length || 0,
+      commentCount: post.comments?.length || 0,
+      shareCount: post.shares?.length || 0
     };
   });
   
@@ -205,8 +219,10 @@ router.post('/', createPostLimit, [
     .withMessage('Invalid community ID')
 ], asyncHandler(async (req, res) => {
   const errors = validationResult(req);
-  
+
   if (!errors.isEmpty()) {
+    console.log('Post validation errors:', errors.array());
+    console.log('Request body:', JSON.stringify(req.body, null, 2));
     return res.status(400).json({
       success: false,
       message: 'Validation errors',

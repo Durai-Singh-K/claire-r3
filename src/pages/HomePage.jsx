@@ -1,14 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { Helmet } from 'react-helmet-async';
-import { Plus, TrendingUp, MessageSquare, Heart, Share2, MoreHorizontal, Filter } from 'lucide-react';
+import { Plus, TrendingUp, MessageSquare, Heart, Share2, MoreHorizontal, Filter, Send } from 'lucide-react';
 import { Button, Avatar, Badge, Loading, Modal } from '../components/ui';
 import { formatRelativeTime, formatCompactNumber } from '../utils/formatters';
 import useAuthStore from '../store/authStore';
 import usePostsStore from '../store/postsStore';
-import { postsAPI } from '../services/api';
-import { Link } from 'react-router-dom';
+import { postsAPI, chatAPI } from '../services/api';
+import { Link, useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 
 const HomePage = () => {
+  const navigate = useNavigate();
   const { user } = useAuthStore();
   const {
     feed,
@@ -45,14 +47,72 @@ const HomePage = () => {
   };
 
   const feedTypes = [
-    { id: 'all', name: 'All Posts', description: 'Posts from everyone' },
-    { id: 'community', name: 'Communities', description: 'Posts from your communities' },
-    { id: 'friends', name: 'Network', description: 'Posts from your network' },
-    { id: 'products', name: 'Products', description: 'Product showcases only' }
+    { id: 'all', name: 'All Posts', description: 'Posts from everyone' }
   ];
 
   const handleLike = async (postId) => {
     await likePost(postId);
+  };
+
+  const isMyPost = (post) => {
+    // Check if the post belongs to the current user
+    const authorId = post.author?._id || post.author;
+    return authorId === user?._id || authorId?.toString() === user?._id?.toString();
+  };
+
+  const handleInquireAboutProduct = async (post) => {
+    try {
+      // Check if user is trying to contact themselves
+      if (isMyPost(post)) {
+        toast.error('You cannot message yourself');
+        return;
+      }
+
+      // Get the author ID - handle both populated and non-populated author
+      const authorId = post.author?._id || post.author;
+
+      if (!authorId) {
+        toast.error('Author information not available');
+        return;
+      }
+
+      // Create or get existing conversation
+      toast.loading('Opening chat...', { id: 'inquire-product' });
+      const response = await chatAPI.createConversation({ userId: authorId });
+      const conversation = response.data.conversation;
+
+      toast.success('Redirecting to chat...', { id: 'inquire-product' });
+
+      // Navigate to messages page with the conversation ID and product info
+      navigate('/messages', {
+        state: {
+          conversationId: conversation._id,
+          productContext: post.product ? {
+            _id: post._id,
+            name: post.product.name,
+            price: post.product.price,
+            images: post.images,
+            description: post.product.description,
+            category: post.product.category
+          } : null
+        }
+      });
+    } catch (error) {
+      console.error('Failed to inquire about product:', error);
+      toast.error('Failed to open chat. Please try again.', { id: 'inquire-product' });
+    }
+  };
+
+  const handleNavigateToProfile = (authorId) => {
+    // Navigate to profile page
+    const userId = authorId._id || authorId;
+    if (userId === user?._id || userId?.toString() === user?._id?.toString()) {
+      // Navigate to own profile
+      navigate('/profile');
+    } else {
+      // Navigate to other user's profile
+      navigate(`/profile/${userId}`);
+    }
   };
 
   const PostCard = ({ post }) => {
@@ -60,7 +120,10 @@ const HomePage = () => {
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 mb-6">
         {/* Post Header */}
         <div className="p-4 pb-3 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
+          <div
+            className="flex items-center space-x-3 cursor-pointer hover:opacity-80 transition-opacity"
+            onClick={() => handleNavigateToProfile(post.author._id || post.author)}
+          >
             <Avatar
               src={post.author.profilePicture}
               name={post.author.displayName || post.author.businessName}
@@ -70,7 +133,7 @@ const HomePage = () => {
             />
             <div>
               <div className="flex items-center space-x-2">
-                <h3 className="font-medium text-gray-900">
+                <h3 className="font-medium text-gray-900 hover:text-primary-600 transition-colors">
                   {post.author.businessName || post.author.displayName}
                 </h3>
                 {post.author.isVerified && <Badge.Verification verified />}
@@ -107,19 +170,26 @@ const HomePage = () => {
           {post.product && (
             <div className="bg-gray-50 rounded-lg p-4 mb-3">
               <div className="flex items-center justify-between">
-                <div>
+                <div className="flex-1">
                   <h4 className="font-medium text-gray-900">{post.product.name}</h4>
-                  <p className="text-sm text-gray-600">{post.product.description}</p>
+                  <p className="text-sm text-gray-600 line-clamp-2">{post.product.description}</p>
                   <div className="flex items-center space-x-3 mt-2">
                     <Badge.Category category={post.product.category} size="sm" />
-                    {post.product.price && (
-                      <Badge.Price price={post.product.price} size="sm" />
-                    )}
                   </div>
                 </div>
-                <Button size="sm" variant="outline">
-                  Inquire
-                </Button>
+                {/* Show Inquire button only for posts not owned by user */}
+                {!isMyPost(post) && (
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    icon={Send}
+                    onClick={() => handleInquireAboutProduct(post)}
+                    className="ml-4"
+                    title="Inquire about this product"
+                  >
+                    Inquire
+                  </Button>
+                )}
               </div>
             </div>
           )}

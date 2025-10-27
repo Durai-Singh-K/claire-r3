@@ -21,9 +21,34 @@ import markdown
 # Suppress warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-# Initialize PyTrends
-pytrend = TrendReq(hl='en-IN', tz=330)
-SERPER_API_KEY = "a25d059942f58d6fd175c3a4060b902d79759e59"  
+# Initialize PyTrends with latest best practices (v4.9.2+)
+# Using recommended timeout values: (connect_timeout, read_timeout)
+# Increased retries and backoff_factor for better reliability
+def initialize_pytrend():
+    """Initialize PyTrends with proper error handling"""
+    try:
+        # Best practice: timeout=(10, 25) as per requests library documentation
+        # tz=330 is UTC+5:30 for India Standard Time
+        pytrend_instance = TrendReq(
+            hl='en-IN',           # Host language: English-India
+            tz=330,               # Timezone: IST (UTC+5:30) in minutes
+            timeout=(10, 25),     # (connect_timeout, read_timeout) in seconds
+            retries=2,            # Number of retries for failed requests
+            backoff_factor=0.5,   # Wait time multiplier: 0.5, 1.0, 2.0 seconds
+            requests_args={'verify': True}  # SSL verification
+        )
+        print("✓ PyTrends initialized successfully")
+        return pytrend_instance
+    except Exception as e:
+        print(f"⚠ PyTrends initialization warning: {e}")
+        print("  Will attempt to initialize on first API call")
+        return None
+
+pytrend = initialize_pytrend()
+SERPER_API_KEY = "a25d059942f58d6fd175c3a4060b902d79759e59"
+
+# Rate limiting configuration (best practice: 60s between requests when rate limited)
+RATE_LIMIT_DELAY = 2  # seconds between requests (conservative approach)  
 
 # State corrections for map compatibility
 state_corrections = {
@@ -42,16 +67,33 @@ except:
     geojson_data = None
 
 def fetch_single_keyword_data(keyword):
-    """Fetch trends data for a single keyword"""
-    print(f"Fetching trends data for: {keyword} at {datetime.now()}")
-    
+    """Fetch trends data for a single keyword using latest pytrends API"""
+    print(f"📊 Fetching trends data for: {keyword} at {datetime.now().strftime('%H:%M:%S')}")
+
+    global pytrend
+    if pytrend is None:
+        pytrend = initialize_pytrend()
+        if pytrend is None:
+            print(f"❌ Cannot initialize PyTrends")
+            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
     time_df = pd.DataFrame()
     region_df = pd.DataFrame()
     related_df = pd.DataFrame()
-    
+
     try:
-        # Build payload for the keyword
-        pytrend.build_payload([keyword], geo='IN', timeframe='today 12-m')
+        # Build payload for the keyword (required for all trend queries)
+        # geo='IN' for India, timeframe='today 12-m' for last 12 months
+        pytrend.build_payload(
+            kw_list=[keyword],
+            cat=0,                    # Category (0 = all categories)
+            timeframe='today 12-m',   # Last 12 months
+            geo='IN',                 # Geographic location: India
+            gprop=''                  # Google property ('', 'images', 'news', 'youtube', 'froogle')
+        )
+
+        # Add rate limiting delay
+        time.sleep(RATE_LIMIT_DELAY)
         
         # Get time series data
         df_time = pytrend.interest_over_time()
@@ -61,26 +103,42 @@ def fetch_single_keyword_data(keyword):
             time_df['date'] = df_time.index
             time_df.reset_index(drop=True, inplace=True)
         
-        # Get regional data
-        df_region = pytrend.interest_by_region(resolution='REGION', inc_low_vol=True)
+        # Get regional data (by region/state)
+        # resolution='REGION' for states, 'CITY' for cities, 'DMA' for metro areas, 'COUNTRY' for countries
+        # inc_low_vol=True includes regions with low search volume
+        df_region = pytrend.interest_by_region(
+            resolution='REGION',
+            inc_low_vol=True,
+            inc_geo_code=False  # Set to True if you need geo codes
+        )
         if not df_region.empty:
             region_df = df_region[[keyword]].rename(columns={keyword: 'value'})
             region_df['region'] = df_region.index
             region_df['term'] = keyword
-            # Apply state name corrections
+            # Apply state name corrections for GeoJSON compatibility
             region_df['region'] = region_df['region'].replace(state_corrections)
             region_df.reset_index(drop=True, inplace=True)
-        
-        # Get related queries
+
+        # Add rate limiting delay between API calls
+        time.sleep(RATE_LIMIT_DELAY)
+
+        # Get related queries (returns dict with 'top' and 'rising' DataFrames)
         try:
             related = pytrend.related_queries()
-            if related.get(keyword) and related[keyword].get('top') is not None:
-                related_df = related[keyword]['top']
-                related_df['term'] = keyword
-        except:
-            print(f"No related queries found for {keyword}")
-        
-        print(f"Data fetching completed for: {keyword}")
+            if related and keyword in related:
+                # Use 'top' queries (most popular), alternative: 'rising' (fastest growing)
+                if related[keyword]['top'] is not None and not related[keyword]['top'].empty:
+                    related_df = related[keyword]['top'].copy()
+                    related_df['term'] = keyword
+                    print(f"  ✓ Found {len(related_df)} related queries")
+                else:
+                    print(f"  ℹ No top related queries available for '{keyword}'")
+            else:
+                print(f"  ℹ No related data structure for '{keyword}'")
+        except Exception as e:
+            print(f"  ⚠ Could not fetch related queries: {str(e)}")
+
+        print(f"✅ Data fetching completed for: {keyword}")
         return time_df, region_df, related_df
         
     except Exception as e:
@@ -88,10 +146,18 @@ def fetch_single_keyword_data(keyword):
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 def fetch_comprehensive_trend_data(keyword):
-    """Fetch comprehensive trends data for multiple time periods and related keywords"""
-    print(f"Fetching comprehensive data for: {keyword}")
-    
-    # Define time periods
+    """Fetch comprehensive trends data for multiple time periods and related keywords using latest pytrends API"""
+    print(f"📊 Fetching comprehensive data for: {keyword}")
+
+    global pytrend
+    if pytrend is None:
+        pytrend = initialize_pytrend()
+        if pytrend is None:
+            print(f"❌ Cannot initialize PyTrends")
+            return {'keyword': keyword, 'time_periods': {}, 'related_keywords': {}, 'regional_data': {}, 'timestamp': datetime.now().isoformat()}
+
+    # Define time periods (using latest pytrends timeframe format)
+    # Format: 'now X-d' for days, 'today X-m' for months, 'today X-y' for years
     time_periods = {
         '1_day': 'now 1-d',
         '7_days': 'now 7-d', 
@@ -109,79 +175,129 @@ def fetch_comprehensive_trend_data(keyword):
         'timestamp': datetime.now().isoformat()
     }
     
-    # Fetch data for each time period
+    # Fetch data for each time period with proper API usage
     for period_name, timeframe in time_periods.items():
         try:
-            print(f"Fetching data for {period_name}...")
-            pytrend.build_payload([keyword], geo='IN', timeframe=timeframe)
-            
+            print(f"  → Fetching data for {period_name}...")
+
+            # Build payload with all parameters
+            pytrend.build_payload(
+                kw_list=[keyword],
+                cat=0,
+                timeframe=timeframe,
+                geo='IN',
+                gprop=''
+            )
+
+            # Add rate limiting delay before API call
+            time.sleep(RATE_LIMIT_DELAY)
+
             # Get time series data
             df_time = pytrend.interest_over_time()
-            if not df_time.empty:
+            if not df_time.empty and keyword in df_time.columns:
                 time_data = df_time[[keyword]].rename(columns={keyword: 'value'})
                 time_data['date'] = df_time.index
                 time_data['period'] = period_name
                 comprehensive_data['time_periods'][period_name] = time_data.to_dict('records')
-            
-            time.sleep(2)  # Rate limiting
+                print(f"    ✓ Got {len(time_data)} data points")
             
         except Exception as e:
             print(f"Error fetching {period_name}: {str(e)}")
             comprehensive_data['time_periods'][period_name] = []
     
-    # Fetch regional data (using 12-month timeframe)
+    # Fetch regional data (using 12-month timeframe for better accuracy)
     try:
-        pytrend.build_payload([keyword], geo='IN', timeframe='today 12-m')
-        df_region = pytrend.interest_by_region(resolution='REGION', inc_low_vol=True)
-        if not df_region.empty:
+        print(f"  → Fetching regional data...")
+        pytrend.build_payload(
+            kw_list=[keyword],
+            cat=0,
+            timeframe='today 12-m',
+            geo='IN',
+            gprop=''
+        )
+
+        time.sleep(RATE_LIMIT_DELAY)
+
+        df_region = pytrend.interest_by_region(
+            resolution='REGION',
+            inc_low_vol=True,
+            inc_geo_code=False
+        )
+        if not df_region.empty and keyword in df_region.columns:
             region_data = df_region[[keyword]].rename(columns={keyword: 'value'})
             region_data['region'] = df_region.index
             region_data['region'] = region_data['region'].replace(state_corrections)
             comprehensive_data['regional_data'] = region_data.to_dict('records')
+            print(f"    ✓ Got data for {len(region_data)} regions")
     except Exception as e:
-        print(f"Error fetching regional data: {str(e)}")
+        print(f"  ⚠ Error fetching regional data: {str(e)}")
         comprehensive_data['regional_data'] = []
     
     # Fetch related queries and their data
     try:
+        print(f"  → Fetching related queries...")
         related = pytrend.related_queries()
-        if related.get(keyword) and related[keyword].get('top') is not None:
-            related_queries = related[keyword]['top']['query'].head(5).tolist()
-            
-            for related_keyword in related_queries:
-                print(f"Fetching data for related keyword: {related_keyword}")
-                related_data = {}
-                
-                # Fetch data for key time periods for related keywords
-                key_periods = ['1_month', '3_months', '6_months']
-                for period_name in key_periods:
-                    timeframe = time_periods[period_name]
-                    try:
-                        pytrend.build_payload([related_keyword], geo='IN', timeframe=timeframe)
-                        df_related = pytrend.interest_over_time()
-                        if not df_related.empty:
-                            related_time_data = df_related[[related_keyword]].rename(columns={related_keyword: 'value'})
-                            related_time_data['date'] = df_related.index
-                            related_time_data['period'] = period_name
-                            related_data[period_name] = related_time_data.to_dict('records')
-                        time.sleep(2)
-                    except:
-                        related_data[period_name] = []
-                
-                comprehensive_data['related_keywords'][related_keyword] = related_data
-                
+
+        if related and keyword in related and related[keyword]['top'] is not None:
+            related_queries_df = related[keyword]['top']
+            if not related_queries_df.empty and 'query' in related_queries_df.columns:
+                related_queries = related_queries_df['query'].head(5).tolist()
+                print(f"    ✓ Found {len(related_queries)} related keywords")
+
+                for related_keyword in related_queries:
+                    print(f"    → Analyzing: {related_keyword}")
+                    related_data = {}
+
+                    # Fetch data for key time periods for related keywords
+                    key_periods = ['1_month', '3_months', '6_months']
+                    for period_name in key_periods:
+                        timeframe = time_periods[period_name]
+                        try:
+                            pytrend.build_payload(
+                                kw_list=[related_keyword],
+                                cat=0,
+                                timeframe=timeframe,
+                                geo='IN',
+                                gprop=''
+                            )
+
+                            time.sleep(RATE_LIMIT_DELAY)
+
+                            df_related = pytrend.interest_over_time()
+                            if not df_related.empty and related_keyword in df_related.columns:
+                                related_time_data = df_related[[related_keyword]].rename(columns={related_keyword: 'value'})
+                                related_time_data['date'] = df_related.index
+                                related_time_data['period'] = period_name
+                                related_data[period_name] = related_time_data.to_dict('records')
+                        except Exception as e:
+                            print(f"      ⚠ Error for {period_name}: {str(e)}")
+                            related_data[period_name] = []
+
+                    comprehensive_data['related_keywords'][related_keyword] = related_data
+            else:
+                print(f"    ℹ No related queries structure found")
+        else:
+            print(f"    ℹ No related queries available")
+
     except Exception as e:
-        print(f"Error fetching related keywords: {str(e)}")
+        print(f"  ⚠ Error fetching related keywords: {str(e)}")
         comprehensive_data['related_keywords'] = {}
-    
-    print("Comprehensive data fetching completed")
+
+    print("✅ Comprehensive data fetching completed")
     return comprehensive_data
 
 def fetch_state_wise_trends(keyword, state_code='IN'):
-    """Fetch trends data for a keyword filtered by Indian state"""
-    print(f"Fetching state-wise trends for: {keyword} in {state_code}")
-    
-    # Indian state geo codes for Google Trends
+    """Fetch trends data for a keyword filtered by Indian state using latest pytrends API"""
+    print(f"📍 Fetching state-wise trends for: {keyword} in {state_code}")
+
+    global pytrend
+    if pytrend is None:
+        pytrend = initialize_pytrend()
+        if pytrend is None:
+            print(f"❌ Cannot initialize PyTrends")
+            return pd.DataFrame(), pd.DataFrame(), {}
+
+    # Indian state geo codes for Google Trends (ISO 3166-2 format)
     state_geo_codes = {
         'Andhra Pradesh': 'IN-AP',
         'Arunachal Pradesh': 'IN-AR', 
@@ -218,33 +334,50 @@ def fetch_state_wise_trends(keyword, state_code='IN'):
     try:
         # Use the provided state code or default to India
         geo_code = state_geo_codes.get(state_code, 'IN')
-        
+        print(f"  Using geo code: {geo_code}")
+
         # Build payload for the keyword with state filter
-        pytrend.build_payload([keyword], geo=geo_code, timeframe='today 12-m')
-        
+        pytrend.build_payload(
+            kw_list=[keyword],
+            cat=0,
+            timeframe='today 12-m',
+            geo=geo_code,
+            gprop=''
+        )
+
+        time.sleep(RATE_LIMIT_DELAY)
+
         # Get time series data
         time_df = pytrend.interest_over_time()
         state_time_data = pd.DataFrame()
-        
-        if not time_df.empty:
+
+        if not time_df.empty and keyword in time_df.columns:
             state_time_data = time_df[[keyword]].rename(columns={keyword: 'value'})
             state_time_data['term'] = keyword
             state_time_data['state'] = state_code
             state_time_data['date'] = time_df.index
             state_time_data.reset_index(drop=True, inplace=True)
-        
+            print(f"  ✓ Got {len(state_time_data)} time series data points")
+
+        time.sleep(RATE_LIMIT_DELAY)
+
         # Get city-level data within the state
-        city_df = pytrend.interest_by_region(resolution='CITY', inc_low_vol=True)
+        city_df = pytrend.interest_by_region(
+            resolution='CITY',
+            inc_low_vol=True,
+            inc_geo_code=False
+        )
         state_city_data = pd.DataFrame()
-        
-        if not city_df.empty:
+
+        if not city_df.empty and keyword in city_df.columns:
             state_city_data = city_df[[keyword]].rename(columns={keyword: 'value'})
             state_city_data['city'] = city_df.index
             state_city_data['term'] = keyword
             state_city_data['state'] = state_code
             state_city_data.reset_index(drop=True, inplace=True)
-        
-        print(f"State-wise data fetching completed for: {keyword} in {state_code}")
+            print(f"  ✓ Got data for {len(state_city_data)} cities")
+
+        print(f"✅ State-wise data fetching completed for: {keyword} in {state_code}")
         return state_time_data, state_city_data, state_geo_codes
         
     except Exception as e:

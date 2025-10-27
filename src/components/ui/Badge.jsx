@@ -170,8 +170,15 @@ const CategoryBadge = ({ category, className, ...props }) => {
   );
 };
 
-// Price Range Badge
-const PriceBadge = ({ price, currency = 'INR', className, ...props }) => {
+// Price Range Badge - FIXED: Handle both old and new schema
+const PriceBadge = ({ price, currency, className, ...props }) => {
+  // Handle both schema formats:
+  // Old: { min, max, currency, unit }
+  // New: { amount, currency, unit }
+  const priceAmount = price?.amount || price?.min || price;
+  const priceCurrency = price?.currency || currency || 'INR';
+  const priceUnit = price?.unit || '';
+
   // Map currency codes to symbols
   const currencySymbols = {
     'INR': '₹',
@@ -180,16 +187,17 @@ const PriceBadge = ({ price, currency = 'INR', className, ...props }) => {
     'GBP': '£'
   };
 
-  const currencySymbol = currencySymbols[currency] || currency;
+  const currencySymbol = currencySymbols[priceCurrency] || priceCurrency;
 
-  const formatPrice = (price) => {
-    if (price >= 100000) {
-      return `${currencySymbol}${(price / 100000).toFixed(1)}L`;
+  const formatPrice = (amount) => {
+    if (!amount && amount !== 0) return 'Price not set';
+    if (amount >= 100000) {
+      return `${currencySymbol}${(amount / 100000).toFixed(1)}L`;
     }
-    if (price >= 1000) {
-      return `${currencySymbol}${(price / 1000).toFixed(1)}K`;
+    if (amount >= 1000) {
+      return `${currencySymbol}${(amount / 1000).toFixed(1)}K`;
     }
-    return `${currencySymbol}${price}`;
+    return `${currencySymbol}${amount}`;
   };
 
   return (
@@ -198,7 +206,7 @@ const PriceBadge = ({ price, currency = 'INR', className, ...props }) => {
       className={cn('font-mono', className)}
       {...props}
     >
-      {formatPrice(price)}
+      {formatPrice(priceAmount)}{priceUnit && `/${priceUnit}`}
     </Badge>
   );
 };

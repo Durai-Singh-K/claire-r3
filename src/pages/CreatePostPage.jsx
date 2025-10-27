@@ -5,6 +5,7 @@ import { Button, Input, Badge, Avatar, Modal } from '../components/ui';
 import { CATEGORIES } from '../config/constants';
 import useAuthStore from '../store/authStore';
 import usePostsStore from '../store/postsStore';
+import toast from 'react-hot-toast';
 
 const CreatePostPage = () => {
   const { user } = useAuthStore();
@@ -131,22 +132,69 @@ const CreatePostPage = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    const postData = {
-      type: postType,
-      content: formData.content,
-      images: formData.images.map(img => ({ url: img.url, alt: img.alt })),
-      product: formData.product,
-      community: formData.community,
-      visibility: formData.visibility,
-      location: formData.location,
-      tags: formData.tags
+
+    // Map frontend postType to schema content.type
+    const contentTypeMap = {
+      'general': 'text',
+      'product': 'product',
+      'image': 'image'
     };
 
+    // Build the post data structure
+    const postData = {
+      content: {
+        text: formData.content.text || '',
+        type: contentTypeMap[postType] || 'text'
+      },
+      images: formData.images.map((img, index) => ({
+        url: img.url, // This is already base64 from FileReader
+        alt: img.alt || img.file?.name || `Image ${index + 1}`,
+        caption: img.caption || '',
+        isPrimary: index === 0
+      })),
+      hashtags: formData.tags
+    };
+
+    // Add location if provided (convert string to object)
+    if (formData.location && typeof formData.location === 'string') {
+      postData.location = {
+        name: formData.location,
+        city: formData.location
+      };
+    } else if (formData.location) {
+      postData.location = formData.location;
+    }
+
+    // Add community if provided
+    if (formData.community) {
+      postData.community = formData.community;
+    }
+
+    // Add product details if this is a product post
+    if (postType === 'product' && formData.product) {
+      postData.product = {
+        name: formData.product.name || '',
+        description: formData.product.description || '',
+        category: formData.product.category || '',
+        price: {
+          amount: parseFloat(formData.product.price) || 0,
+          currency: formData.product.currency || 'INR',
+          unit: formData.product.unit || 'piece'
+        },
+        availability: {
+          inStock: true,
+          minOrderQuantity: parseInt(formData.product.minOrderQuantity) || 1
+        },
+        tags: formData.tags
+      };
+    }
+
+    console.log('Submitting post data:', postData);
+
     const result = await createPost(postData);
-    
+
     if (result.success) {
-      // Reset form or redirect
+      // Reset form
       setFormData({
         content: { text: '' },
         images: [],
@@ -156,6 +204,13 @@ const CreatePostPage = () => {
         location: null,
         tags: []
       });
+      setPostType('general');
+
+      // Redirect to feed or show success message
+      toast.success('Post created successfully!');
+    } else {
+      console.error('Failed to create post:', result.error);
+      toast.error(result.error || 'Failed to create post. Please try again.');
     }
   };
 

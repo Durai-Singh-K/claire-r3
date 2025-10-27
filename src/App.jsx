@@ -22,6 +22,7 @@ import CommunitiesPage from './pages/CommunitiesPage';
 import CommunityDetailPage from './pages/CommunityDetailPage';
 import CommunityJoinPage from './pages/CommunityJoinPage';
 import BusinessPage from './pages/BusinessPage';
+import ProfilePage from './pages/ProfilePage';
 import ProductsPage from './pages/ProductsPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import CreatePostPage from './pages/CreatePostPage';
@@ -193,6 +194,22 @@ function App() {
               <ProtectedRoute>
                 <Layout>
                   <BusinessPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/profile" element={
+              <ProtectedRoute>
+                <Layout>
+                  <ProfilePage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/profile/:userId" element={
+              <ProtectedRoute>
+                <Layout>
+                  <ProfilePage />
                 </Layout>
               </ProtectedRoute>
             } />
